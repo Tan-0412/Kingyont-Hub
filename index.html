@@ -518,24 +518,34 @@ function resizeImage(file, maxW, maxH, quality){
 function addPhotos(input){
   const preview=document.getElementById('photo-preview');
   const files=[...input.files];
-  files.forEach(f=>{
-    resizeImage(f, 1200, 1200, 0.7).then(src=>{
-      photoData.push(src);
-      const wrap=document.createElement('div');
-      wrap.style.cssText='position:relative;display:inline-block';
-      const img=document.createElement('img');
-      img.src=src;
-      const curIdx=photoData.length-1;
-      const del=document.createElement('button');
-      del.textContent='×';
-      del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
-      del.onclick=()=>{ photoData.splice(curIdx,1); wrap.remove(); updatePhotoBadge(); };
-      wrap.appendChild(img);
-      wrap.appendChild(del);
-      preview.appendChild(wrap);
-      updatePhotoBadge();
-    });
+  if(!files.length) return;
+
+  // disable ปุ่ม save ระหว่าง resize
+  const saveBtn=document.querySelector('button[onclick="saveRecord()"]');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='⏳ กำลังโหลดรูป...'; }
+
+  const promises=files.map(f=>resizeImage(f,1200,1200,0.7).then(src=>{
+    photoData.push(src);
+    const wrap=document.createElement('div');
+    wrap.style.cssText='position:relative;display:inline-block';
+    const img=document.createElement('img');
+    img.src=src;
+    const curIdx=photoData.length-1;
+    const del=document.createElement('button');
+    del.textContent='×';
+    del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
+    del.onclick=()=>{ photoData.splice(curIdx,1); wrap.remove(); updatePhotoBadge(); };
+    wrap.appendChild(img);
+    wrap.appendChild(del);
+    preview.appendChild(wrap);
+  }));
+
+  Promise.all(promises).then(()=>{
+    updatePhotoBadge();
+    // enable ปุ่ม save หลัง resize เสร็จทุกรูป
+    if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='✅ บันทึกและส่งข้อมูล'; }
   });
+
   input.value='';
 }
 
