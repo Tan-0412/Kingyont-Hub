@@ -425,7 +425,29 @@ function getOrCreateFolder(name) {
 <script>
 let records = JSON.parse(localStorage.getItem('ky-hub-records')||'[]');
 let selectedId = null;
-let photoData = [];
+// restore photoData จาก sessionStorage กรณี browser reload หลังถ่ายรูป
+let photoData = JSON.parse(sessionStorage.getItem('ky-photo-draft')||'[]');
+if(photoData.length>0){
+  // restore preview
+  window.addEventListener('DOMContentLoaded',()=>{
+    const preview=document.getElementById('photo-preview');
+    if(!preview) return;
+    photoData.forEach((src,i)=>{
+      const wrap=document.createElement('div');
+      wrap.style.cssText='position:relative;display:inline-block';
+      const img=document.createElement('img');
+      img.src=src;
+      const del=document.createElement('button');
+      del.textContent='×';
+      del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
+      del.onclick=(()=>{const idx=i;return()=>{ photoData.splice(idx,1); wrap.remove(); savePhotoDraft(); updatePhotoBadge(); };})();
+      wrap.appendChild(img);
+      wrap.appendChild(del);
+      preview.appendChild(wrap);
+    });
+    updatePhotoBadge();
+  });
+}
 const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzhwTZ5Y0Ys_D51cJjlB0asYHDQ3CWpyTnEnyzawoavmUfPJZ6CKFzq6ATMr8FKDSSH/exec';
 let gsUrl = localStorage.getItem('ky-hub-gs-url') || DEFAULT_GAS_URL;
 let deferredPrompt = null;
@@ -492,36 +514,40 @@ async function loadFromSheets(){
   }catch(e){ /* silent fail */ }
 }
 
+function savePhotoDraft(){
+  try{ sessionStorage.setItem('ky-photo-draft', JSON.stringify(photoData)); }catch(e){}
+}
+
 function addPhotos(input){
   const preview=document.getElementById('photo-preview');
-  const files=[...input.files];
-  const promises=files.map(f=>new Promise(res=>{
+  const badge=document.getElementById('photo-count-badge');
+  [...input.files].forEach(f=>{
     const reader=new FileReader();
     reader.onload=e=>{
-      const src=e.target.result;
-      photoData.push(src);
+      photoData.push(e.target.result);
+      savePhotoDraft();
       const wrap=document.createElement('div');
       wrap.style.cssText='position:relative;display:inline-block';
       const img=document.createElement('img');
-      img.src=src;
+      img.src=e.target.result;
       const del=document.createElement('button');
       del.textContent='×';
       del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
-      const curIdx=photoData.length-1;
-      del.onclick=()=>{ photoData.splice(curIdx,1); wrap.remove(); updatePhotoBadge(); };
+      const idx=photoData.length-1;
+      del.onclick=()=>{ photoData.splice(idx,1); wrap.remove(); updatePhotoBadge(); };
       wrap.appendChild(img);
       wrap.appendChild(del);
       preview.appendChild(wrap);
-      res();
+      updatePhotoBadge();
     };
     reader.readAsDataURL(f);
-  }));
-  Promise.all(promises).then(()=>updatePhotoBadge());
-  input.value='';
+  });
+  input.value=''; // reset so same file can be added again
 }
 
 function clearPhotos(){
   photoData=[];
+  sessionStorage.removeItem('ky-photo-draft');
   document.getElementById('photo-preview').innerHTML='';
   document.getElementById('photo-count-badge').style.display='none';
   document.getElementById('f-photo-cam').value='';
@@ -551,10 +577,8 @@ async function saveRecord(){
   }
 }
 async function _doSave(){
-  // reset selectedId ถ้าไม่ได้กำลัง edit
-  const newId = selectedId || Date.now();
   const d={
-    id: newId,
+    id: selectedId||Date.now(),
     date: document.getElementById('f-date').value,
     time: document.getElementById('f-time').value,
     sender: document.getElementById('f-sender').value.trim(),
