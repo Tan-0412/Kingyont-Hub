@@ -283,15 +283,7 @@ textarea{resize:none;line-height:1.6}
 </div>
 <div class="section-bar">
   <span style="font-size:13px;color:var(--text2)">รายการทั้งหมด</span>
-  <div style="display:flex;align-items:center;gap:8px;">
-    <span id="refresh-status" style="font-size:11px;color:var(--text3);"></span>
-    <button onclick="refreshHistory()" id="refresh-btn"
-      style="background:none;border:1px solid var(--border);border-radius:8px;padding:4px 10px;
-      font-size:12px;color:var(--text2);cursor:pointer;font-family:'Sarabun',sans-serif;">
-      🔄 รีเฟรช
-    </button>
-    <span class="count-badge" id="rec-count">0</span>
-  </div>
+  <span class="count-badge" id="rec-count">0</span>
 </div>
 <div id="history-list"></div>
 </div>
@@ -482,22 +474,10 @@ function switchTab(t){
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',['form','history'][i]===t));
   document.getElementById('tab-form').style.display=t==='form'?'block':'none';
   document.getElementById('tab-history').style.display=t==='history'?'block':'none';
-  if(t==='history') refreshHistory();
+  if(t==='history'){ loadFromSheets(); renderHistory(); }
 }
 
-async function refreshHistory(){
-  const btn=document.getElementById('refresh-btn');
-  const status=document.getElementById('refresh-status');
-  if(btn) btn.disabled=true;
-  if(status) status.textContent='⏳ กำลังโหลด...';
-  renderHistory();
-  await loadFromSheets();
-  if(btn) btn.disabled=false;
-  if(status) status.textContent='✅ อัปเดตแล้ว';
-  setTimeout(()=>{ if(status) status.textContent=''; },3000);
-}
-
-// โหลดข้อมูลจาก Sheet เป็นหลักเสมอ
+// ✅ FIX 3: โหลดข้อมูลจาก Google Sheet (merge กับ localStorage)
 async function loadFromSheets(){
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
   if(!url) return;
@@ -506,12 +486,23 @@ async function loadFromSheets(){
     const result=await resp.json().catch(()=>null);
     if(!result||result.status!=='ok'||!Array.isArray(result.records)) return;
     const sheetRecords=result.records;
-    const sheetIds=new Set(sheetRecords.map(r=>String(r.id)));
-    const localOnly=records.filter(r=>!sheetIds.has(String(r.id)));
-    records=[...sheetRecords,...localOnly]
-      .sort((a,b)=>String(b.id).localeCompare(String(a.id)));
-    localStorage.setItem('ky-hub-records',JSON.stringify(records));
-    renderHistory();
+    if(sheetRecords.length===0) return;
+    // merge: เพิ่มรายการจาก sheet ที่ไม่มีใน localStorage
+    const existingIds=new Set(records.map(r=>String(r.id)));
+    let added=0;
+    sheetRecords.forEach(r=>{
+      if(!existingIds.has(String(r.id))){
+        records.push(r);
+        added++;
+      }
+    });
+    if(added>0){
+      // เรียงจากใหม่ไปเก่า
+      records.sort((a,b)=>String(b.id).localeCompare(String(a.id)));
+      localStorage.setItem('ky-hub-records',JSON.stringify(records));
+      renderHistory();
+      showToast(`✅ โหลดข้อมูลจาก Sheets เพิ่ม ${added} รายการ`,'ok');
+    }
   }catch(e){ /* silent fail */ }
 }
 
@@ -610,39 +601,24 @@ async function saveRecord(){
 
 async function pushToSheets(d){
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
-  const syncNote=document.getElementById('modal-sync-note');
-  function setNote(msg, color){
-    if(syncNote){ syncNote.style.display='block'; syncNote.style.background=color||'#f0f0f0'; syncNote.style.color='#333'; syncNote.textContent=msg; }
-  }
-  if(!url){
-    setNote('⚠️ ยังไม่ได้ตั้งค่า Google Sheets — ข้อมูลบันทึกในเครื่องแล้ว','#fff3cd');
-    return;
-  }
+  if(!url) return;
   try{
-    const hasPhotos=d.photos&&d.photos.length>0;
-    setNote(hasPhotos?'⏳ กำลังอัปโหลดรูปไป Drive...':'⏳ กำลัง sync Google Sheets...','#e8f4fd');
-    // ✅ FIX 1: ใช้ redirect:follow เพื่อให้ follow redirect ของ Apps Script
     const resp=await fetch(url,{
       method:'POST',
       redirect:'follow',
       body:JSON.stringify({...d})
     });
     let result={};
-    try{ result=await resp.json(); }catch(e){ result={}; }
+    try{ result=await resp.json(); }catch(e){}
     if(result.fileIds && result.fileIds.length>0){
-      const idx=records.findIndex(r=>r.id===d.id);
-      if(idx>=0){ records[idx].fileIds=result.fileIds; localStorage.setItem('ky-hub-records',JSON.stringify(records)); }
-    }
-    if(result.status==='ok'||result.status==='saved'||result.message==='saved'){
-      const msg=hasPhotos?`✅ Sheets + อัปโหลดรูป ${d.photos.length} ใบ ไป Drive สำเร็จ`:'✅ บันทึกลง Google Sheets สำเร็จ';
-      setNote(msg,'#d4edda');
-      showToast(msg,'ok');
-    } else {
-      setNote('⚠️ บันทึก Sheets อาจไม่สำเร็จ: '+(result.message||'ไม่ทราบสาเหตุ'),'#fff3cd');
+      const idx=records.findIndex(r=>String(r.id)===String(d.id));
+      if(idx>=0){
+        records[idx].fileIds=result.fileIds;
+        localStorage.setItem('ky-hub-records',JSON.stringify(records));
+      }
     }
   }catch(e){
-    setNote('❌ sync Google Sheets ไม่สำเร็จ (ข้อมูลบันทึกในเครื่องแล้ว)','#f8d7da');
-    showToast('⚠️ บันทึกในเครื่องแล้ว แต่ sync Sheets ไม่สำเร็จ','warn');
+    // silent fail — ข้อมูลบันทึกใน localStorage แล้ว
   }
 }
 
@@ -685,7 +661,6 @@ function renderHistory(){
 function openDetail(id, titleOverride){
   const r=records.find(x=>String(x.id)===String(id));
   if(!r) return;
-  // blur keyboard และ scroll to top ก่อนเปิด modal บนมือถือ
   if(document.activeElement) document.activeElement.blur();
   window.scrollTo(0,0);
   selectedId=id;
