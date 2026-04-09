@@ -477,6 +477,7 @@ function switchTab(t){
   if(t==='history'){ loadFromSheets(); renderHistory(); }
 }
 
+// ✅ FIX 3: โหลดข้อมูลจาก Google Sheet (merge กับ localStorage)
 async function loadFromSheets(){
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
   if(!url) return;
@@ -484,36 +485,39 @@ async function loadFromSheets(){
     const resp=await fetch(url+'?action=getRecords',{redirect:'follow'});
     const result=await resp.json().catch(()=>null);
     if(!result||result.status!=='ok'||!Array.isArray(result.records)) return;
+    // ใช้ข้อมูลจาก Sheet เป็นหลักเลย แทนที่ทั้งหมด
     records = result.records;
     localStorage.setItem('ky-hub-records',JSON.stringify(records));
     renderHistory();
-  }catch(e){}
+  }catch(e){ /* silent fail */ }
 }
 
 function addPhotos(input){
   const preview=document.getElementById('photo-preview');
-  const badge=document.getElementById('photo-count-badge');
-  [...input.files].forEach(f=>{
+  const files=[...input.files];
+  const promises=files.map(f=>new Promise(res=>{
     const reader=new FileReader();
     reader.onload=e=>{
-      photoData.push(e.target.result);
+      const src=e.target.result;
+      photoData.push(src);
       const wrap=document.createElement('div');
       wrap.style.cssText='position:relative;display:inline-block';
       const img=document.createElement('img');
-      img.src=e.target.result;
+      img.src=src;
       const del=document.createElement('button');
       del.textContent='×';
       del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
-      const idx=photoData.length-1;
-      del.onclick=()=>{ photoData.splice(idx,1); wrap.remove(); updatePhotoBadge(); };
+      const curIdx=photoData.length-1;
+      del.onclick=()=>{ photoData.splice(curIdx,1); wrap.remove(); updatePhotoBadge(); };
       wrap.appendChild(img);
       wrap.appendChild(del);
       preview.appendChild(wrap);
-      updatePhotoBadge();
+      res();
     };
     reader.readAsDataURL(f);
-  });
-  input.value=''; // reset so same file can be added again
+  }));
+  Promise.all(promises).then(()=>updatePhotoBadge());
+  input.value='';
 }
 
 function clearPhotos(){
@@ -534,21 +538,23 @@ function updatePhotoBadge(){
   }
 }
 
-let _saving = false;
+let _saving=false;
 async function saveRecord(){
   if(_saving) return;
-  _saving = true;
-  const _btn = document.querySelector('button[onclick="saveRecord()"]');
-  if(_btn){ _btn.disabled=true; _btn.textContent='⏳ กำลังบันทึก...'; }
+  _saving=true;
+  const _btn=document.querySelector('button[onclick="saveRecord()"]');
+  if(_btn){_btn.disabled=true;_btn.textContent='⏳ กำลังบันทึก...';}
   try{ await _doSave(); }
   finally{
     _saving=false;
-    if(_btn){ _btn.disabled=false; _btn.innerHTML='✅ บันทึกและส่งข้อมูล'; }
+    if(_btn){_btn.disabled=false;_btn.textContent='✅ บันทึกและส่งข้อมูล';}
   }
 }
 async function _doSave(){
+  // reset selectedId ถ้าไม่ได้กำลัง edit
+  const newId = selectedId || Date.now();
   const d={
-    id: selectedId||Date.now(),
+    id: newId,
     date: document.getElementById('f-date').value,
     time: document.getElementById('f-time').value,
     sender: document.getElementById('f-sender').value.trim(),
@@ -575,7 +581,7 @@ async function _doSave(){
     return;
   }
 
-  const isEdit = records.some(r=>String(r.id)===String(d.id));
+  const isEdit = selectedId && records.some(r=>String(r.id)===String(d.id));
   if(isEdit){
     records[records.findIndex(r=>String(r.id)===String(d.id))]=d;
   } else {
@@ -585,7 +591,7 @@ async function _doSave(){
   selectedId=null;
   clearForm();
   showToast('✅ บันทึกสำเร็จ!','ok');
-  setTimeout(()=>openDetail(d.id,'✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย'), 500);
+  setTimeout(()=>openDetail(d.id,'✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย'),500);
   pushToSheets(d);
 }
 
