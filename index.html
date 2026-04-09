@@ -425,29 +425,7 @@ function getOrCreateFolder(name) {
 <script>
 let records = JSON.parse(localStorage.getItem('ky-hub-records')||'[]');
 let selectedId = null;
-// restore photoData จาก sessionStorage กรณี browser reload หลังถ่ายรูป
-let photoData = JSON.parse(sessionStorage.getItem('ky-photo-draft')||'[]');
-if(photoData.length>0){
-  // restore preview
-  window.addEventListener('DOMContentLoaded',()=>{
-    const preview=document.getElementById('photo-preview');
-    if(!preview) return;
-    photoData.forEach((src,i)=>{
-      const wrap=document.createElement('div');
-      wrap.style.cssText='position:relative;display:inline-block';
-      const img=document.createElement('img');
-      img.src=src;
-      const del=document.createElement('button');
-      del.textContent='×';
-      del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
-      del.onclick=(()=>{const idx=i;return()=>{ photoData.splice(idx,1); wrap.remove(); savePhotoDraft(); updatePhotoBadge(); };})();
-      wrap.appendChild(img);
-      wrap.appendChild(del);
-      preview.appendChild(wrap);
-    });
-    updatePhotoBadge();
-  });
-}
+let photoData = [];
 const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbzhwTZ5Y0Ys_D51cJjlB0asYHDQ3CWpyTnEnyzawoavmUfPJZ6CKFzq6ATMr8FKDSSH/exec';
 let gsUrl = localStorage.getItem('ky-hub-gs-url') || DEFAULT_GAS_URL;
 let deferredPrompt = null;
@@ -514,40 +492,55 @@ async function loadFromSheets(){
   }catch(e){ /* silent fail */ }
 }
 
-function savePhotoDraft(){
-  try{ sessionStorage.setItem('ky-photo-draft', JSON.stringify(photoData)); }catch(e){}
+// resize รูปก่อน save — ลดขนาดจาก ~5MB เหลือ ~200KB
+function resizeImage(file, maxW, maxH, quality){
+  return new Promise(res=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        let w=img.width, h=img.height;
+        if(w>maxW||h>maxH){
+          const ratio=Math.min(maxW/w,maxH/h);
+          w=Math.round(w*ratio); h=Math.round(h*ratio);
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=w; canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        res(canvas.toDataURL('image/jpeg', quality||0.7));
+      };
+      img.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function addPhotos(input){
   const preview=document.getElementById('photo-preview');
-  const badge=document.getElementById('photo-count-badge');
-  [...input.files].forEach(f=>{
-    const reader=new FileReader();
-    reader.onload=e=>{
-      photoData.push(e.target.result);
-      savePhotoDraft();
+  const files=[...input.files];
+  files.forEach(f=>{
+    resizeImage(f, 1200, 1200, 0.7).then(src=>{
+      photoData.push(src);
       const wrap=document.createElement('div');
       wrap.style.cssText='position:relative;display:inline-block';
       const img=document.createElement('img');
-      img.src=e.target.result;
+      img.src=src;
+      const curIdx=photoData.length-1;
       const del=document.createElement('button');
       del.textContent='×';
       del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
-      const idx=photoData.length-1;
-      del.onclick=()=>{ photoData.splice(idx,1); wrap.remove(); updatePhotoBadge(); };
+      del.onclick=()=>{ photoData.splice(curIdx,1); wrap.remove(); updatePhotoBadge(); };
       wrap.appendChild(img);
       wrap.appendChild(del);
       preview.appendChild(wrap);
       updatePhotoBadge();
-    };
-    reader.readAsDataURL(f);
+    });
   });
-  input.value=''; // reset so same file can be added again
+  input.value='';
 }
 
 function clearPhotos(){
   photoData=[];
-  sessionStorage.removeItem('ky-photo-draft');
   document.getElementById('photo-preview').innerHTML='';
   document.getElementById('photo-count-badge').style.display='none';
   document.getElementById('f-photo-cam').value='';
@@ -564,19 +557,7 @@ function updatePhotoBadge(){
   }
 }
 
-let _saving=false;
 async function saveRecord(){
-  if(_saving) return;
-  _saving=true;
-  const _btn=document.querySelector('button[onclick="saveRecord()"]');
-  if(_btn){_btn.disabled=true;_btn.textContent='⏳ กำลังบันทึก...';}
-  try{ await _doSave(); }
-  finally{
-    _saving=false;
-    if(_btn){_btn.disabled=false;_btn.textContent='✅ บันทึกและส่งข้อมูล';}
-  }
-}
-async function _doSave(){
   const d={
     id: selectedId||Date.now(),
     date: document.getElementById('f-date').value,
