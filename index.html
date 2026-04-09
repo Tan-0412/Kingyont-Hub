@@ -518,34 +518,24 @@ function resizeImage(file, maxW, maxH, quality){
 function addPhotos(input){
   const preview=document.getElementById('photo-preview');
   const files=[...input.files];
-  if(!files.length) return;
-
-  // disable ปุ่ม save ระหว่าง resize
-  const saveBtn=document.querySelector('button[onclick="saveRecord()"]');
-  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='⏳ กำลังโหลดรูป...'; }
-
-  const promises=files.map(f=>resizeImage(f,1200,1200,0.7).then(src=>{
-    photoData.push(src);
-    const wrap=document.createElement('div');
-    wrap.style.cssText='position:relative;display:inline-block';
-    const img=document.createElement('img');
-    img.src=src;
-    const curIdx=photoData.length-1;
-    const del=document.createElement('button');
-    del.textContent='×';
-    del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
-    del.onclick=()=>{ photoData.splice(curIdx,1); wrap.remove(); updatePhotoBadge(); };
-    wrap.appendChild(img);
-    wrap.appendChild(del);
-    preview.appendChild(wrap);
-  }));
-
-  Promise.all(promises).then(()=>{
-    updatePhotoBadge();
-    // enable ปุ่ม save หลัง resize เสร็จทุกรูป
-    if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='✅ บันทึกและส่งข้อมูล'; }
+  files.forEach(f=>{
+    resizeImage(f, 1200, 1200, 0.7).then(src=>{
+      photoData.push(src);
+      const wrap=document.createElement('div');
+      wrap.style.cssText='position:relative;display:inline-block';
+      const img=document.createElement('img');
+      img.src=src;
+      const curIdx=photoData.length-1;
+      const del=document.createElement('button');
+      del.textContent='×';
+      del.style.cssText='position:absolute;top:-4px;right:-4px;background:#cc0000;color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;line-height:1;cursor:pointer;padding:0';
+      del.onclick=()=>{ photoData.splice(curIdx,1); wrap.remove(); updatePhotoBadge(); };
+      wrap.appendChild(img);
+      wrap.appendChild(del);
+      preview.appendChild(wrap);
+      updatePhotoBadge();
+    });
   });
-
   input.value='';
 }
 
@@ -633,6 +623,21 @@ function clearForm(){
   document.getElementById('f-time').value=t.toTimeString().slice(0,5);
 }
 
+function fmtDisplayDate(d){
+  if(!d) return '';
+  // ISO format: 2026-04-08T17:00:00.000Z
+  if(d.includes('T')){
+    const dt=new Date(d);
+    if(!isNaN(dt)){
+      const day=String(dt.getDate()).padStart(2,'0');
+      const mon=String(dt.getMonth()+1).padStart(2,'0');
+      const yr=dt.getFullYear();
+      return day+'/'+mon+'/'+yr;
+    }
+  }
+  return d;
+}
+
 function renderHistory(){
   const q=document.getElementById('search-input').value.toLowerCase();
   const ff=document.getElementById('filter-from').value;
@@ -652,7 +657,7 @@ function renderHistory(){
         ${r.photos&&r.photos.length?'<span style="font-size:11px;color:var(--text3);white-space:nowrap">📷'+r.photos.length+'</span>':''}
       </div>
       <div class="item-meta">
-        ${r.date} ${r.time} &nbsp;·&nbsp; ${r.sender}${r.dept?' (ฝ่ายผู้ส่ง: '+r.dept+')':''}
+        ${fmtDisplayDate(r.date)} ${r.time?r.time.slice(0,5):''} &nbsp;·&nbsp; ${r.sender}${r.dept?' (ฝ่ายผู้ส่ง: '+r.dept+')':''}
         <br><span class="badge badge-blue">${r.from}</span> → <span class="badge badge-green">${r.to}</span>
         ${r.receiver?'<br>👤 ผู้รับ: '+r.receiver+(r.receiverDept?' (ฝ่ายผู้รับ: '+r.receiverDept+')':''):''}
         ${r.custodian?' <span class="badge badge-amber">'+r.custodian+'</span>':''}
@@ -673,7 +678,7 @@ function openDetail(id, titleOverride){
     `<div class="photo-preview" style="margin-top:4px">${r.photos.map(p=>`<img src="${p}">`).join('')}</div>`:
     '<span style="color:var(--text3)">ไม่มีรูป</span>';
   document.getElementById('modal-body').innerHTML=
-    [['📅 วันเวลา',r.date+' '+r.time+' น.'],['👤 ผู้ส่ง',r.sender+(r.dept?' (ฝ่ายผู้ส่ง: '+r.dept+')':'')],
+    [['📅 วันเวลา',fmtDisplayDate(r.date)+' '+( r.time?r.time.slice(0,5):'')+' น.'],['👤 ผู้ส่ง',r.sender+(r.dept?' (ฝ่ายผู้ส่ง: '+r.dept+')':'')],
      ['🏢 จากสาขา',r.from],['🏢 ถึงสาขา',r.to],['📦 รายการ',r.items],
      ['👤 ผู้รับ',(r.receiver||'-')+(r.receiverDept?' (ฝ่ายผู้รับ: '+r.receiverDept+')':'')],
      ['🗂 ผู้รับฝาก',r.custodian||'-'],
@@ -743,8 +748,7 @@ function buildLineText(r){
 👤 ผู้รับ       : ${r.receiver || '(ไม่ระบุ)'}${r.receiverDept ? ' (ฝ่ายผู้รับ: ' + r.receiverDept + ')' : ''}${r.custodian ? `
 🗂 ผู้รับฝาก   : ${r.custodian}` : ''}${r.photos && r.photos.length ? `
 📷 รูปถ่าย    : ${r.photos.length} รูป (ดูรูปแนบ)` : ''}
-━━━━━━━━━━━━━━━━━━━━
-📌 กรุณายืนยันการรับสิ่งของด้วยครับ/ค่ะ`;
+━━━━━━━━━━━━━━━━━━━━`;
 }
 
 function showLine(){
