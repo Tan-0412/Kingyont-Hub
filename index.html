@@ -485,24 +485,10 @@ async function loadFromSheets(){
     const resp=await fetch(url+'?action=getRecords',{redirect:'follow'});
     const result=await resp.json().catch(()=>null);
     if(!result||result.status!=='ok'||!Array.isArray(result.records)) return;
-    const sheetRecords=result.records;
-    if(sheetRecords.length===0) return;
-    // merge: เพิ่มรายการจาก sheet ที่ไม่มีใน localStorage
-    const existingIds=new Set(records.map(r=>String(r.id)));
-    let added=0;
-    sheetRecords.forEach(r=>{
-      if(!existingIds.has(String(r.id))){
-        records.push(r);
-        added++;
-      }
-    });
-    if(added>0){
-      // เรียงจากใหม่ไปเก่า
-      records.sort((a,b)=>String(b.id).localeCompare(String(a.id)));
-      localStorage.setItem('ky-hub-records',JSON.stringify(records));
-      renderHistory();
-      showToast(`✅ โหลดข้อมูลจาก Sheets เพิ่ม ${added} รายการ`,'ok');
-    }
+    // ใช้ข้อมูลจาก Sheet เป็นหลักเลย แทนที่ทั้งหมด
+    records = result.records;
+    localStorage.setItem('ky-hub-records',JSON.stringify(records));
+    renderHistory();
   }catch(e){ /* silent fail */ }
 }
 
@@ -579,46 +565,59 @@ async function saveRecord(){
     return;
   }
 
-  const isEdit = records.some(r => String(r.id) === String(d.id));
+  const isEdit=records.some(r=>r.id===d.id);
   if(isEdit){
-    records[records.findIndex(r => String(r.id) === String(d.id))] = d;
-    localStorage.setItem('ky-hub-records', JSON.stringify(records));
-    selectedId = null;
+    records[records.findIndex(r=>r.id===d.id)]=d;
+    localStorage.setItem('ky-hub-records',JSON.stringify(records));
+    showToast('✅ แก้ไขสำเร็จ','ok');
+    selectedId=null;
     clearForm();
-    showToast('✅ แก้ไขสำเร็จ', 'ok');
-    setTimeout(() => openDetail(d.id, '✅ แก้ไขสำเร็จ! กดส่ง LINE ได้เลย'), 500);
-    pushToSheets(d);
+    openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย');  // เปิด modal แสดงรายการที่แก้ไข
   } else {
     records.unshift(d);
-    localStorage.setItem('ky-hub-records', JSON.stringify(records));
-    selectedId = null;
+    localStorage.setItem('ky-hub-records',JSON.stringify(records));
+    selectedId=null;
     clearForm();
-    showToast('✅ บันทึกสำเร็จ!', 'ok');
-    setTimeout(() => openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย'), 500);
-    pushToSheets(d);
+    openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย');  // เปิด modal ทันทีหลังบันทึก
+    await pushToSheets(d);  // sync sheets ใน background
   }
 }
 
 async function pushToSheets(d){
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
-  if(!url) return;
+  const syncNote=document.getElementById('modal-sync-note');
+  function setNote(msg, color){
+    if(syncNote){ syncNote.style.display='block'; syncNote.style.background=color||'#f0f0f0'; syncNote.style.color='#333'; syncNote.textContent=msg; }
+  }
+  if(!url){
+    setNote('⚠️ ยังไม่ได้ตั้งค่า Google Sheets — ข้อมูลบันทึกในเครื่องแล้ว','#fff3cd');
+    return;
+  }
   try{
+    const hasPhotos=d.photos&&d.photos.length>0;
+    setNote(hasPhotos?'⏳ กำลังอัปโหลดรูปไป Drive...':'⏳ กำลัง sync Google Sheets...','#e8f4fd');
+    // ✅ FIX 1: ใช้ redirect:follow เพื่อให้ follow redirect ของ Apps Script
     const resp=await fetch(url,{
       method:'POST',
       redirect:'follow',
       body:JSON.stringify({...d})
     });
     let result={};
-    try{ result=await resp.json(); }catch(e){}
+    try{ result=await resp.json(); }catch(e){ result={}; }
     if(result.fileIds && result.fileIds.length>0){
-      const idx=records.findIndex(r=>String(r.id)===String(d.id));
-      if(idx>=0){
-        records[idx].fileIds=result.fileIds;
-        localStorage.setItem('ky-hub-records',JSON.stringify(records));
-      }
+      const idx=records.findIndex(r=>r.id===d.id);
+      if(idx>=0){ records[idx].fileIds=result.fileIds; localStorage.setItem('ky-hub-records',JSON.stringify(records)); }
+    }
+    if(result.status==='ok'||result.status==='saved'||result.message==='saved'){
+      const msg=hasPhotos?`✅ Sheets + อัปโหลดรูป ${d.photos.length} ใบ ไป Drive สำเร็จ`:'✅ บันทึกลง Google Sheets สำเร็จ';
+      setNote(msg,'#d4edda');
+      showToast(msg,'ok');
+    } else {
+      setNote('⚠️ บันทึก Sheets อาจไม่สำเร็จ: '+(result.message||'ไม่ทราบสาเหตุ'),'#fff3cd');
     }
   }catch(e){
-    // silent fail — ข้อมูลบันทึกใน localStorage แล้ว
+    setNote('❌ sync Google Sheets ไม่สำเร็จ (ข้อมูลบันทึกในเครื่องแล้ว)','#f8d7da');
+    showToast('⚠️ บันทึกในเครื่องแล้ว แต่ sync Sheets ไม่สำเร็จ','warn');
   }
 }
 
@@ -659,10 +658,8 @@ function renderHistory(){
 }
 
 function openDetail(id, titleOverride){
-  const r=records.find(x=>String(x.id)===String(id));
+  const r=records.find(x=>x.id===id);
   if(!r) return;
-  if(document.activeElement) document.activeElement.blur();
-  window.scrollTo(0,0);
   selectedId=id;
   document.getElementById('del-confirm-box').innerHTML='';
   document.getElementById('modal-sync-note').style.display='none';
@@ -681,7 +678,7 @@ function openDetail(id, titleOverride){
 }
 
 function editRecord(){
-  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
+  const r=records.find(x=>x.id===selectedId);if(!r) return;
   document.getElementById('f-date').value=r.date;
   document.getElementById('f-time').value=r.time;
   document.getElementById('f-sender').value=r.sender;
@@ -723,7 +720,7 @@ function confirmDelete(){
 }
 
 function doDelete(){
-  records=records.filter(r=>String(r.id)!==String(selectedId));
+  records=records.filter(r=>r.id!==selectedId);
   localStorage.setItem('ky-hub-records',JSON.stringify(records));
   closeModal('detail-modal');renderHistory();
   showToast('🗑 ลบรายการแล้ว','ok');
@@ -746,14 +743,14 @@ function buildLineText(r){
 }
 
 function showLine(){
-  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
+  const r=records.find(x=>x.id===selectedId);if(!r) return;
   document.getElementById('line-text').textContent=buildLineText(r);
   closeModal('detail-modal');
   document.getElementById('line-modal').classList.add('show');
 }
 
 async function confirmSendLine(){
-  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
+  const r=records.find(x=>x.id===selectedId);if(!r) return;
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
   if(!url){
     closeModal('line-modal');
