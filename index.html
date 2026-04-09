@@ -477,7 +477,7 @@ function switchTab(t){
   if(t==='history'){ loadFromSheets(); renderHistory(); }
 }
 
-// โหลดข้อมูลจาก Google Sheet เป็นหลัก
+// ✅ FIX 3: โหลดข้อมูลจาก Google Sheet (merge กับ localStorage)
 async function loadFromSheets(){
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
   if(!url) return;
@@ -487,15 +487,22 @@ async function loadFromSheets(){
     if(!result||result.status!=='ok'||!Array.isArray(result.records)) return;
     const sheetRecords=result.records;
     if(sheetRecords.length===0) return;
-    // ใช้ข้อมูลจาก Sheet เป็นหลัก merge กับ localStorage
-    const sheetIds=new Set(sheetRecords.map(r=>String(r.id)));
-    // เก็บรายการ local ที่ยังไม่ได้ sync (ไม่มีใน sheet)
-    const localOnly=records.filter(r=>!sheetIds.has(String(r.id)));
-    // รวม sheet + local ที่ยังไม่ sync เรียงจากใหม่ไปเก่า
-    records=[...sheetRecords,...localOnly]
-      .sort((a,b)=>String(b.id).localeCompare(String(a.id)));
-    localStorage.setItem('ky-hub-records',JSON.stringify(records));
-    renderHistory();
+    // merge: เพิ่มรายการจาก sheet ที่ไม่มีใน localStorage
+    const existingIds=new Set(records.map(r=>String(r.id)));
+    let added=0;
+    sheetRecords.forEach(r=>{
+      if(!existingIds.has(String(r.id))){
+        records.push(r);
+        added++;
+      }
+    });
+    if(added>0){
+      // เรียงจากใหม่ไปเก่า
+      records.sort((a,b)=>String(b.id).localeCompare(String(a.id)));
+      localStorage.setItem('ky-hub-records',JSON.stringify(records));
+      renderHistory();
+      showToast(`✅ โหลดข้อมูลจาก Sheets เพิ่ม ${added} รายการ`,'ok');
+    }
   }catch(e){ /* silent fail */ }
 }
 
@@ -572,24 +579,22 @@ async function saveRecord(){
     return;
   }
 
-  const isEdit=records.some(r=>String(r.id)===String(d.id));
+  const isEdit = records.some(r => String(r.id) === String(d.id));
   if(isEdit){
-    records[records.findIndex(r=>String(r.id)===String(d.id))]=d;
-    localStorage.setItem('ky-hub-records',JSON.stringify(records));
-    showToast('✅ แก้ไขสำเร็จ','ok');
-    selectedId=null;
+    records[records.findIndex(r => String(r.id) === String(d.id))] = d;
+    localStorage.setItem('ky-hub-records', JSON.stringify(records));
+    selectedId = null;
     clearForm();
-    renderHistory();
-    setTimeout(()=>openDetail(d.id, '✅ แก้ไขสำเร็จ! กดส่ง LINE ได้เลย'), 300);
+    showToast('✅ แก้ไขสำเร็จ', 'ok');
+    setTimeout(() => openDetail(d.id, '✅ แก้ไขสำเร็จ! กดส่ง LINE ได้เลย'), 400);
     pushToSheets(d);
   } else {
     records.unshift(d);
-    localStorage.setItem('ky-hub-records',JSON.stringify(records));
-    showToast('✅ บันทึกสำเร็จ!','ok');
-    selectedId=null;
+    localStorage.setItem('ky-hub-records', JSON.stringify(records));
+    selectedId = null;
     clearForm();
-    renderHistory();
-    setTimeout(()=>openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย'), 300);
+    showToast('✅ บันทึกสำเร็จ!', 'ok');
+    setTimeout(() => openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย'), 400);
     pushToSheets(d);
   }
 }
