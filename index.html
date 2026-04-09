@@ -283,7 +283,15 @@ textarea{resize:none;line-height:1.6}
 </div>
 <div class="section-bar">
   <span style="font-size:13px;color:var(--text2)">รายการทั้งหมด</span>
-  <span class="count-badge" id="rec-count">0</span>
+  <div style="display:flex;align-items:center;gap:8px;">
+    <span id="refresh-status" style="font-size:11px;color:var(--text3);"></span>
+    <button onclick="refreshHistory()" id="refresh-btn"
+      style="background:none;border:1px solid var(--border);border-radius:8px;padding:4px 10px;
+      font-size:12px;color:var(--text2);cursor:pointer;font-family:'Sarabun',sans-serif;">
+      🔄 รีเฟรช
+    </button>
+    <span class="count-badge" id="rec-count">0</span>
+  </div>
 </div>
 <div id="history-list"></div>
 </div>
@@ -474,10 +482,22 @@ function switchTab(t){
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',['form','history'][i]===t));
   document.getElementById('tab-form').style.display=t==='form'?'block':'none';
   document.getElementById('tab-history').style.display=t==='history'?'block':'none';
-  if(t==='history'){ loadFromSheets(); renderHistory(); }
+  if(t==='history'){ refreshHistory(); }
 }
 
-// ✅ FIX 3: โหลดข้อมูลจาก Google Sheet (merge กับ localStorage)
+async function refreshHistory(){
+  const btn = document.getElementById('refresh-btn');
+  const status = document.getElementById('refresh-status');
+  if(btn) btn.disabled = true;
+  if(status) status.textContent = '⏳ กำลังโหลด...';
+  renderHistory();
+  await loadFromSheets();
+  if(btn) btn.disabled = false;
+  if(status) status.textContent = '✅ อัปเดตแล้ว';
+  setTimeout(()=>{ if(status) status.textContent=''; }, 3000);
+}
+
+// โหลดข้อมูลจาก Sheet เป็นหลักเสมอ — ทุกเครื่องเห็นข้อมูลตรงกัน
 async function loadFromSheets(){
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
   if(!url) return;
@@ -486,23 +506,12 @@ async function loadFromSheets(){
     const result=await resp.json().catch(()=>null);
     if(!result||result.status!=='ok'||!Array.isArray(result.records)) return;
     const sheetRecords=result.records;
-    if(sheetRecords.length===0) return;
-    // merge: เพิ่มรายการจาก sheet ที่ไม่มีใน localStorage
-    const existingIds=new Set(records.map(r=>String(r.id)));
-    let added=0;
-    sheetRecords.forEach(r=>{
-      if(!existingIds.has(String(r.id))){
-        records.push(r);
-        added++;
-      }
-    });
-    if(added>0){
-      // เรียงจากใหม่ไปเก่า
-      records.sort((a,b)=>String(b.id).localeCompare(String(a.id)));
-      localStorage.setItem('ky-hub-records',JSON.stringify(records));
-      renderHistory();
-      showToast(`✅ โหลดข้อมูลจาก Sheets เพิ่ม ${added} รายการ`,'ok');
-    }
+    const sheetIds=new Set(sheetRecords.map(r=>String(r.id)));
+    const localOnly=records.filter(r=>!sheetIds.has(String(r.id)));
+    records=[...sheetRecords,...localOnly]
+      .sort((a,b)=>String(b.id).localeCompare(String(a.id)));
+    localStorage.setItem('ky-hub-records',JSON.stringify(records));
+    renderHistory();
   }catch(e){ /* silent fail */ }
 }
 
@@ -579,23 +588,21 @@ async function saveRecord(){
     return;
   }
 
-  const isEdit = records.some(r => String(r.id) === String(d.id));
+  const isEdit=records.some(r=>r.id===d.id);
   if(isEdit){
-    records[records.findIndex(r => String(r.id) === String(d.id))] = d;
-    localStorage.setItem('ky-hub-records', JSON.stringify(records));
-    selectedId = null;
+    records[records.findIndex(r=>r.id===d.id)]=d;
+    localStorage.setItem('ky-hub-records',JSON.stringify(records));
+    showToast('✅ แก้ไขสำเร็จ','ok');
+    selectedId=null;
     clearForm();
-    showToast('✅ แก้ไขสำเร็จ', 'ok');
-    setTimeout(() => openDetail(d.id, '✅ แก้ไขสำเร็จ! กดส่ง LINE ได้เลย'), 400);
-    pushToSheets(d);
+    openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย');  // เปิด modal แสดงรายการที่แก้ไข
   } else {
     records.unshift(d);
-    localStorage.setItem('ky-hub-records', JSON.stringify(records));
-    selectedId = null;
+    localStorage.setItem('ky-hub-records',JSON.stringify(records));
+    selectedId=null;
     clearForm();
-    showToast('✅ บันทึกสำเร็จ!', 'ok');
-    setTimeout(() => openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย'), 400);
-    pushToSheets(d);
+    openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย');  // เปิด modal ทันทีหลังบันทึก
+    await pushToSheets(d);  // sync sheets ใน background
   }
 }
 
@@ -674,7 +681,7 @@ function renderHistory(){
 }
 
 function openDetail(id, titleOverride){
-  const r=records.find(x=>String(x.id)===String(id));
+  const r=records.find(x=>x.id===id);
   if(!r) return;
   selectedId=id;
   document.getElementById('del-confirm-box').innerHTML='';
@@ -694,7 +701,7 @@ function openDetail(id, titleOverride){
 }
 
 function editRecord(){
-  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
+  const r=records.find(x=>x.id===selectedId);if(!r) return;
   document.getElementById('f-date').value=r.date;
   document.getElementById('f-time').value=r.time;
   document.getElementById('f-sender').value=r.sender;
@@ -736,7 +743,7 @@ function confirmDelete(){
 }
 
 function doDelete(){
-  records=records.filter(r=>String(r.id)!==String(selectedId));
+  records=records.filter(r=>r.id!==selectedId);
   localStorage.setItem('ky-hub-records',JSON.stringify(records));
   closeModal('detail-modal');renderHistory();
   showToast('🗑 ลบรายการแล้ว','ok');
@@ -759,7 +766,7 @@ function buildLineText(r){
 }
 
 function showLine(){
-  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
+  const r=records.find(x=>x.id===selectedId);if(!r) return;
   document.getElementById('line-text').textContent=buildLineText(r);
   closeModal('detail-modal');
   document.getElementById('line-modal').classList.add('show');
