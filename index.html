@@ -482,19 +482,19 @@ function switchTab(t){
   document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',['form','history'][i]===t));
   document.getElementById('tab-form').style.display=t==='form'?'block':'none';
   document.getElementById('tab-history').style.display=t==='history'?'block':'none';
-  if(t==='history'){ refreshHistory(); }
+  if(t==='history') refreshHistory();
 }
 
 async function refreshHistory(){
-  const btn = document.getElementById('refresh-btn');
-  const status = document.getElementById('refresh-status');
-  if(btn) btn.disabled = true;
-  if(status) status.textContent = '⏳ กำลังโหลด...';
+  const btn=document.getElementById('refresh-btn');
+  const status=document.getElementById('refresh-status');
+  if(btn) btn.disabled=true;
+  if(status) status.textContent='⏳ กำลังโหลด...';
   renderHistory();
   await loadFromSheets();
-  if(btn) btn.disabled = false;
-  if(status) status.textContent = '✅ อัปเดตแล้ว';
-  setTimeout(()=>{ if(status) status.textContent=''; }, 3000);
+  if(btn) btn.disabled=false;
+  if(status) status.textContent='✅ อัปเดตแล้ว';
+  setTimeout(()=>{ if(status) status.textContent=''; },3000);
 }
 
 // โหลดข้อมูลจาก Sheet เป็นหลักเสมอ — ทุกเครื่องเห็นข้อมูลตรงกัน
@@ -588,21 +588,23 @@ async function saveRecord(){
     return;
   }
 
-  const isEdit=records.some(r=>r.id===d.id);
+  const isEdit = records.some(r => String(r.id) === String(d.id));
   if(isEdit){
-    records[records.findIndex(r=>r.id===d.id)]=d;
-    localStorage.setItem('ky-hub-records',JSON.stringify(records));
-    showToast('✅ แก้ไขสำเร็จ','ok');
-    selectedId=null;
+    records[records.findIndex(r => String(r.id) === String(d.id))] = d;
+    localStorage.setItem('ky-hub-records', JSON.stringify(records));
+    selectedId = null;
     clearForm();
-    openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย');  // เปิด modal แสดงรายการที่แก้ไข
+    showToast('✅ แก้ไขสำเร็จ', 'ok');
+    setTimeout(() => openDetail(d.id, '✅ แก้ไขสำเร็จ! กดส่ง LINE ได้เลย'), 400);
+    pushToSheets(d);
   } else {
     records.unshift(d);
-    localStorage.setItem('ky-hub-records',JSON.stringify(records));
-    selectedId=null;
+    localStorage.setItem('ky-hub-records', JSON.stringify(records));
+    selectedId = null;
     clearForm();
-    openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย');  // เปิด modal ทันทีหลังบันทึก
-    await pushToSheets(d);  // sync sheets ใน background
+    showToast('✅ บันทึกสำเร็จ!', 'ok');
+    setTimeout(() => openDetail(d.id, '✅ บันทึกสำเร็จ! กดส่ง LINE ได้เลย'), 400);
+    pushToSheets(d);
   }
 }
 
@@ -681,7 +683,7 @@ function renderHistory(){
 }
 
 function openDetail(id, titleOverride){
-  const r=records.find(x=>x.id===id);
+  const r=records.find(x=>String(x.id)===String(id));
   if(!r) return;
   selectedId=id;
   document.getElementById('del-confirm-box').innerHTML='';
@@ -701,7 +703,7 @@ function openDetail(id, titleOverride){
 }
 
 function editRecord(){
-  const r=records.find(x=>x.id===selectedId);if(!r) return;
+  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
   document.getElementById('f-date').value=r.date;
   document.getElementById('f-time').value=r.time;
   document.getElementById('f-sender').value=r.sender;
@@ -743,7 +745,7 @@ function confirmDelete(){
 }
 
 function doDelete(){
-  records=records.filter(r=>r.id!==selectedId);
+  records=records.filter(r=>String(r.id)!==String(selectedId));
   localStorage.setItem('ky-hub-records',JSON.stringify(records));
   closeModal('detail-modal');renderHistory();
   showToast('🗑 ลบรายการแล้ว','ok');
@@ -766,14 +768,14 @@ function buildLineText(r){
 }
 
 function showLine(){
-  const r=records.find(x=>x.id===selectedId);if(!r) return;
+  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
   document.getElementById('line-text').textContent=buildLineText(r);
   closeModal('detail-modal');
   document.getElementById('line-modal').classList.add('show');
 }
 
 async function confirmSendLine(){
-  const r=records.find(x=>x.id===selectedId);if(!r) return;
+  const r=records.find(x=>String(x.id)===String(selectedId));if(!r) return;
   const url=gsUrl||localStorage.getItem('ky-hub-gs-url');
   if(!url){
     closeModal('line-modal');
